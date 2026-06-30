@@ -14,6 +14,7 @@ import { findOverdueTasks } from "@/lib/engine/tasks"
 import { emitForEvent } from "@/lib/notify/dispatch"
 import { requireAccess, requireWrite } from "@/lib/rbac/guards"
 import { Repository } from "@/lib/repository"
+import { getWorkspaceTimezone } from "@/lib/workspace/timezone"
 
 /**
  * Care-task domain operations — clones the canonical daily-log pattern: guard
@@ -27,13 +28,6 @@ import { Repository } from "@/lib/repository"
 
 const COLLECTION = "careTasks" as const
 const COMPLETIONS = "careTaskCompletions" as const
-
-/**
- * The workspace IANA timezone. The workspace record carries this in its
- * settings (see BUILD/03 §workspaces); until that accessor is wired we default
- * to a single zone so overdue math stays workspace-local rather than UTC.
- */
-const DEFAULT_TIMEZONE = "America/Los_Angeles"
 
 /** List all care tasks in the active workspace (view-gated). */
 export async function listCareTasks(): Promise<ActionResult<CareTask[]>> {
@@ -57,7 +51,8 @@ export async function listOverdueCareTasks(): Promise<
         const ctx = await requireAccess("tasks")
         const repo = new Repository(ctx.userId, ctx.workspaceId)
         const tasks = await repo.list<CareTask>(COLLECTION)
-        const overdue = findOverdueTasks(tasks, new Date(), DEFAULT_TIMEZONE)
+        const tz = await getWorkspaceTimezone(ctx.workspaceId)
+        const overdue = findOverdueTasks(tasks, new Date(), tz)
         return ok(overdue)
     } catch (error) {
         return failFrom(error)

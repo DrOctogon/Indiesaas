@@ -6,6 +6,7 @@ import type { Alert } from "@/lib/domains/ops/types"
 import { findOverdueTasks } from "@/lib/engine/tasks"
 import { sendEmail } from "@/lib/notify/channels/email"
 import { Repository } from "@/lib/repository"
+import { getWorkspaceTimezone } from "@/lib/workspace/timezone"
 
 /**
  * Daily digest (see BUILD/05 §digest, checklist line 143). Assembles a user's
@@ -152,13 +153,6 @@ export async function sendDailyDigest(
     }
 }
 
-/**
- * Until a per-workspace IANA timezone accessor is wired (see BUILD/03
- * §workspaces; mirrored as `DEFAULT_TIMEZONE` in care/tasks.ts), digests are
- * evaluated in a single workspace-local zone so overdue math is not UTC.
- */
-const DIGEST_TIMEZONE = "America/Los_Angeles"
-
 export interface DigestRunResult {
     /** Distinct (workspace, member) pairs considered. */
     candidates: number
@@ -183,14 +177,22 @@ export async function runDailyDigests(now: Date): Promise<DigestRunResult> {
         .from(members)
         .innerJoin(users, eq(users.id, members.userId))
 
+    // Resolve each workspace's timezone once, not per member.
+    const tzByWorkspace = new Map<string, string>()
+
     let sent = 0
     for (const row of rows) {
         if (!row.email) continue
+        let tz = tzByWorkspace.get(row.workspaceId)
+        if (tz === undefined) {
+            tz = await getWorkspaceTimezone(row.workspaceId)
+            tzByWorkspace.set(row.workspaceId, tz)
+        }
         const dispatched = await sendDailyDigest(
             row.workspaceId,
             row.userId,
             row.email,
-            DIGEST_TIMEZONE,
+            tz,
             now
         )
         if (dispatched) sent++
