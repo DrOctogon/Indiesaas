@@ -11,6 +11,7 @@ import {
 } from "@/lib/domains/care/types"
 import { type ActionResult, failFrom, ok } from "@/lib/domains/result"
 import { findOverdueTasks } from "@/lib/engine/tasks"
+import { emitForEvent } from "@/lib/notify/dispatch"
 import { requireAccess, requireWrite } from "@/lib/rbac/guards"
 import { Repository } from "@/lib/repository"
 
@@ -77,6 +78,16 @@ export async function createCareTask(
         const created = await repo.create<CareTaskInput>(
             COLLECTION,
             parsed.data
+        )
+        await emitForEvent(
+            {
+                workspaceId: ctx.workspaceId,
+                source: "careTask",
+                action: "created",
+                entityId: created.id,
+                occurredAt: new Date().toISOString()
+            },
+            ctx.userId
         )
         revalidatePath("/care/tasks")
         return ok(created)

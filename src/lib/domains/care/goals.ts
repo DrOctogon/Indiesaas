@@ -7,6 +7,7 @@ import {
     careGoalInput
 } from "@/lib/domains/care/types"
 import { type ActionResult, failFrom, ok } from "@/lib/domains/result"
+import { emitForEvent } from "@/lib/notify/dispatch"
 import { requireAccess, requireWrite } from "@/lib/rbac/guards"
 import { Repository } from "@/lib/repository"
 
@@ -44,6 +45,16 @@ export async function createCareGoal(
         const created = await repo.create<CareGoalInput>(
             COLLECTION,
             parsed.data
+        )
+        await emitForEvent(
+            {
+                workspaceId: ctx.workspaceId,
+                source: "goal",
+                action: "created",
+                entityId: created.id,
+                occurredAt: new Date().toISOString()
+            },
+            ctx.userId
         )
         revalidatePath("/care/goals")
         return ok(created)

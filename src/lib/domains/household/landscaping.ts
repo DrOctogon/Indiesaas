@@ -13,6 +13,7 @@ import {
     landscapingZoneInput
 } from "@/lib/domains/household/types"
 import { type ActionResult, failFrom, ok } from "@/lib/domains/result"
+import { emitForEvent } from "@/lib/notify/dispatch"
 import { requireAccess, requireWrite } from "@/lib/rbac/guards"
 import { Repository } from "@/lib/repository"
 
@@ -140,6 +141,16 @@ export async function createLandscapingTask(
         }
         const repo = new Repository(ctx.userId, ctx.workspaceId)
         const task = await repo.create<LandscapingTaskInput>(TASKS, parsed.data)
+        await emitForEvent(
+            {
+                workspaceId: ctx.workspaceId,
+                source: "landscaping",
+                action: "created",
+                entityId: task.id,
+                occurredAt: new Date().toISOString()
+            },
+            ctx.userId
+        )
         revalidatePath("/household/landscaping")
         return ok(task)
     } catch (error) {

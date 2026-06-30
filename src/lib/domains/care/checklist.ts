@@ -7,6 +7,7 @@ import {
     shiftChecklistInput
 } from "@/lib/domains/care/types"
 import { type ActionResult, failFrom, ok } from "@/lib/domains/result"
+import { emitForEvent } from "@/lib/notify/dispatch"
 import { requireAccess, requireWrite } from "@/lib/rbac/guards"
 import { Repository } from "@/lib/repository"
 
@@ -46,6 +47,16 @@ export async function createShiftChecklist(
         const created = await repo.create<ShiftChecklistInput>(
             COLLECTION,
             parsed.data
+        )
+        await emitForEvent(
+            {
+                workspaceId: ctx.workspaceId,
+                source: "checklist",
+                action: "created",
+                entityId: created.id,
+                occurredAt: new Date().toISOString()
+            },
+            ctx.userId
         )
         revalidatePath("/care/checklist")
         return ok(created)

@@ -1,6 +1,7 @@
 import { eq, sql } from "drizzle-orm"
 import { accountPreferences } from "@/database/collections"
 import { db } from "@/database/db"
+import { members, users } from "@/database/schema"
 import type { Alert } from "@/lib/domains/ops/types"
 import { findOverdueTasks } from "@/lib/engine/tasks"
 import { sendEmail } from "@/lib/notify/channels/email"
@@ -149,4 +150,50 @@ export async function sendDailyDigest(
         console.error("[notify/digest] sendDailyDigest failed", error)
         return false
     }
+}
+
+/**
+ * Until a per-workspace IANA timezone accessor is wired (see BUILD/03
+ * §workspaces; mirrored as `DEFAULT_TIMEZONE` in care/tasks.ts), digests are
+ * evaluated in a single workspace-local zone so overdue math is not UTC.
+ */
+const DIGEST_TIMEZONE = "America/Los_Angeles"
+
+export interface DigestRunResult {
+    /** Distinct (workspace, member) pairs considered. */
+    candidates: number
+    /** How many actually dispatched a digest email (opted-in + had signal). */
+    sent: number
+}
+
+/**
+ * Sweep every (workspace, member) pair and dispatch each member's opt-in daily
+ * digest for that workspace. Intended to be driven by a scheduled invoker (the
+ * `/api/cron/daily-digest` route). `sendDailyDigest` gates on the per-user
+ * opt-in and never throws, so one bad row can't abort the sweep. `now` is
+ * injected for deterministic overdue math.
+ */
+export async function runDailyDigests(now: Date): Promise<DigestRunResult> {
+    const rows = await db
+        .select({
+            workspaceId: members.organizationId,
+            userId: members.userId,
+            email: users.email
+        })
+        .from(members)
+        .innerJoin(users, eq(users.id, members.userId))
+
+    let sent = 0
+    for (const row of rows) {
+        if (!row.email) continue
+        const dispatched = await sendDailyDigest(
+            row.workspaceId,
+            row.userId,
+            row.email,
+            DIGEST_TIMEZONE,
+            now
+        )
+        if (dispatched) sent++
+    }
+    return { candidates: rows.length, sent }
 }

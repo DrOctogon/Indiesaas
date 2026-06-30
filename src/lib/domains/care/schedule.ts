@@ -15,6 +15,7 @@ import {
     detectConflicts,
     findUpcomingVisits
 } from "@/lib/engine/scheduling"
+import { emitForEvent } from "@/lib/notify/dispatch"
 import { requireAccess, requireWrite } from "@/lib/rbac/guards"
 import { Repository } from "@/lib/repository"
 
@@ -90,6 +91,16 @@ export async function createVisit(
         }
         const repo = new Repository(ctx.userId, ctx.workspaceId)
         const created = await repo.create<VisitInput>(COLLECTION, parsed.data)
+        await emitForEvent(
+            {
+                workspaceId: ctx.workspaceId,
+                source: "schedule",
+                action: "created",
+                entityId: created.id,
+                occurredAt: new Date().toISOString()
+            },
+            ctx.userId
+        )
         revalidatePath("/care/schedule")
         return ok(created)
     } catch (error) {
