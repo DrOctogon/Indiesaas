@@ -1,9 +1,10 @@
 import { headers } from "next/headers"
 import CancelSubButton from "@/app/dashboard/billing/cancel-sub-button"
 import PlanSelector from "@/app/dashboard/billing/plan-selector"
+import { getWorkspaceSeatUsage } from "@/lib/domains/system/seats"
 import { auth } from "@/lib/auth"
 import { getActiveSubscription } from "@/lib/payments/actions"
-import { requireManage } from "@/lib/rbac/guards"
+import { type AuthContext, requireManage } from "@/lib/rbac/guards"
 
 /**
  * Billing & Plan page (System area, admin-only — navKey "billing"). The manage
@@ -15,8 +16,9 @@ import { requireManage } from "@/lib/rbac/guards"
  * logic. Seat-cap enforcement at invite time lives in the Members feature.
  */
 export default async function AdminBillingPage() {
+    let authContext: AuthContext
     try {
-        await requireManage("billing", ["admin"])
+        authContext = await requireManage("billing", ["admin"])
     } catch {
         return (
             <main className="p-6">
@@ -32,6 +34,7 @@ export default async function AdminBillingPage() {
     const session = await auth.api.getSession({ headers: requestHeaders })
     const result = await getActiveSubscription()
     const activeSub = result.subscription
+    const seatUsage = await getWorkspaceSeatUsage(authContext.workspaceId)
 
     return (
         <main className="flex flex-col gap-6 p-6">
@@ -40,6 +43,15 @@ export default async function AdminBillingPage() {
                 <p className="text-muted-foreground text-sm">
                     Manage this workspace’s subscription and plan.
                 </p>
+            </div>
+
+            <div className="flex items-center justify-between rounded border p-4 text-sm">
+                <span className="text-muted-foreground">Seats used</span>
+                <span className="font-medium">
+                    {seatUsage.cap === null
+                        ? `${seatUsage.used} of unlimited`
+                        : `${seatUsage.used} of ${seatUsage.cap}`}
+                </span>
             </div>
 
             {activeSub ? (
