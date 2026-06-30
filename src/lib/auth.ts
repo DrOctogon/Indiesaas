@@ -2,7 +2,13 @@ import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
 import { organization } from "better-auth/plugins"
 import { stripe } from "@better-auth/stripe"
-import { ac, roles } from "@/lib/rbac/access"
+import { ac, type RoleId, roles } from "@/lib/rbac/access"
+import {
+    guardInviteSeat,
+    guardRemoveMember,
+    guardRoleChange
+} from "@/lib/workspace/lifecycle"
+import { seedWorkspace } from "@/lib/workspace/seed"
 import Stripe from "stripe"
 import { headers } from "next/headers"
 import { Resend } from "resend"
@@ -84,7 +90,35 @@ export const auth = betterAuth({
         organization({
             ac,
             roles,
-            creatorRole: "admin"
+            creatorRole: "admin",
+            organizationHooks: {
+                // A fresh workspace is seeded with product content so it's usable
+                // on day one (per-workspace, idempotent). Self-signup completes in
+                // the onboarding flow by creating an organization, which fires this.
+                afterCreateOrganization: async ({ organization }) => {
+                    await seedWorkspace(organization.id)
+                },
+                // Last-active-admin protection: block removing/deactivating/leaving
+                // or demoting the workspace's final admin.
+                beforeRemoveMember: async ({ member, organization }) => {
+                    await guardRemoveMember(organization.id, member.userId)
+                },
+                beforeUpdateMemberRole: async ({
+                    member,
+                    newRole,
+                    organization
+                }) => {
+                    await guardRoleChange(
+                        organization.id,
+                        member.userId,
+                        newRole as RoleId
+                    )
+                },
+                // Per-plan member seat cap, enforced at invite time.
+                beforeCreateInvitation: async ({ organization }) => {
+                    await guardInviteSeat(organization.id)
+                }
+            }
         }),
         stripe({
             stripeClient,
