@@ -1,6 +1,8 @@
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { organization } from "better-auth/plugins"
 import { stripe } from "@better-auth/stripe"
+import { ac, roles } from "@/lib/rbac/access"
 import Stripe from "stripe"
 import { headers } from "next/headers"
 import { Resend } from "resend"
@@ -75,6 +77,15 @@ export const auth = betterAuth({
         }
     },
     plugins: [
+        // Workspace = organization; membership = member(role); invite = invitation.
+        // The session's activeOrganizationId is the active workspace; the effective
+        // role is the active membership's role. Seat cap, last-active-admin guards,
+        // and per-workspace seeding are layered on in M1.
+        organization({
+            ac,
+            roles,
+            creatorRole: "admin"
+        }),
         stripe({
             stripeClient,
             stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET!,
