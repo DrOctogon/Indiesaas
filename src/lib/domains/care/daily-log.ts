@@ -8,6 +8,7 @@ import {
 } from "@/lib/domains/care/types"
 import { type ActionResult, failFrom, ok } from "@/lib/domains/result"
 import { type EscalationSignal, shouldEscalate } from "@/lib/engine/escalation"
+import { emitForEvent } from "@/lib/notify/dispatch"
 import { requireAccess, requireWrite } from "@/lib/rbac/guards"
 import { Repository } from "@/lib/repository"
 
@@ -56,6 +57,18 @@ export async function createDailyLog(
         const repo = new Repository(ctx.userId, ctx.workspaceId)
         const log = await repo.create<DailyLogInput>(COLLECTION, parsed.data)
         const escalations = shouldEscalate(log)
+        // Emit the domain event so workspace alert rules can fire (cooldown +
+        // audience handled in the engine; never throws).
+        await emitForEvent(
+            {
+                workspaceId: ctx.workspaceId,
+                source: "dailyLog",
+                action: "created",
+                entityId: log.id,
+                occurredAt: new Date().toISOString()
+            },
+            ctx.userId
+        )
         revalidatePath("/care/daily-log")
         return ok({ log, escalations })
     } catch (error) {
