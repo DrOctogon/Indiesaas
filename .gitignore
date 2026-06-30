@@ -48,3 +48,9 @@ yarn-error.log*
 
 # drizzle migrations
 migrations/
+
+# ECC inert cross-harness mirrors (not read by Claude Code)
+.claude/.cursor/
+.claude/.opencode/
+.claude/.agents/
+.claude/.codex/
