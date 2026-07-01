@@ -1,7 +1,9 @@
 import { betterAuth } from "better-auth"
 import { drizzleAdapter } from "better-auth/adapters/drizzle"
+import { createAuthMiddleware } from "better-auth/api"
 import { organization } from "better-auth/plugins"
 import { stripe } from "@better-auth/stripe"
+import { recordLogin, recordLoginFailed } from "@/lib/audit/auth-events"
 import { ac, type RoleId, roles } from "@/lib/rbac/access"
 import {
     guardInviteSeat,
@@ -81,6 +83,40 @@ export const auth = betterAuth({
             clientId: process.env.TWITTER_CLIENT_ID as string,
             clientSecret: process.env.TWITTER_CLIENT_SECRET as string
         }
+    },
+    // Auth-event auditing (BUILD/06 invariant 2). A successful login creates a
+    // session — audited in the databaseHooks below. A failed credential login
+    // creates no session — detected in the after-hook by a sign-in path that
+    // produced no `newSession`. Both writers never throw, so auditing can never
+    // break authentication.
+    databaseHooks: {
+        session: {
+            create: {
+                after: async (session) => {
+                    const workspaceId =
+                        (
+                            session as {
+                                activeOrganizationId?: string | null
+                            }
+                        ).activeOrganizationId ?? null
+                    await recordLogin(session.userId, workspaceId, null)
+                }
+            }
+        }
+    },
+    hooks: {
+        after: createAuthMiddleware(async (ctx) => {
+            if (!ctx.path.startsWith("/sign-in")) return
+            // A successful sign-in sets `newSession` (already audited by the
+            // session hook); its absence on a sign-in path means the attempt
+            // failed.
+            if (ctx.context.newSession) return
+            const email =
+                typeof ctx.body?.email === "string" ? ctx.body.email : null
+            const xff = ctx.headers?.get("x-forwarded-for")
+            const ip = xff ? (xff.split(",")[0]?.trim() ?? null) : null
+            await recordLoginFailed(email, ip)
+        })
     },
     plugins: [
         // Workspace = organization; membership = member(role); invite = invitation.

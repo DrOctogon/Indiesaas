@@ -123,12 +123,15 @@ export const auditLog = pgTable(
     "audit_log",
     {
         id: text("id").primaryKey(),
-        workspaceId: text("workspace_id")
-            .notNull()
-            .references(() => organizations.id, { onDelete: "cascade" }),
-        actorUserId: text("actor_user_id")
-            .notNull()
-            .references(() => users.id, { onDelete: "cascade" }),
+        // Nullable for auth events: a login carries no active workspace yet, and a
+        // login_failed for an unknown email has no actor. Mutation rows always
+        // populate both (written by the Repository).
+        workspaceId: text("workspace_id").references(() => organizations.id, {
+            onDelete: "cascade"
+        }),
+        actorUserId: text("actor_user_id").references(() => users.id, {
+            onDelete: "cascade"
+        }),
         action: text("action").notNull(), // create | update | delete | login | login_failed
         collection: text("collection").notNull(),
         entityId: text("entity_id"),
