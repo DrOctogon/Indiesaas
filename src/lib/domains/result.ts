@@ -1,4 +1,4 @@
-import { ForbiddenError, UnauthorizedError } from "@/lib/rbac/guards"
+import { ForbiddenError, UnauthorizedError } from "@/lib/rbac/errors"
 
 /**
  * Uniform server-action result envelope for every domain op (mirrors the

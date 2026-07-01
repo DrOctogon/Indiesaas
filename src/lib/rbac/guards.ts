@@ -1,6 +1,7 @@
 import { headers } from "next/headers"
 import { auth } from "@/lib/auth"
 import { ROLE_IDS, type RoleId } from "@/lib/rbac/access"
+import { ForbiddenError, UnauthorizedError } from "@/lib/rbac/errors"
 import { type NavKey, type WriteArea, can, canWrite } from "@/lib/rbac/matrix"
 
 /**
@@ -12,21 +13,13 @@ import { type NavKey, type WriteArea, can, canWrite } from "@/lib/rbac/matrix"
  * returned `AuthContext` carries the `workspaceId` every downstream query must
  * scope by (the Repository is constructed from it). The client-side gate is
  * cosmetic; these are the real gates.
+ *
+ * The error classes live in the dependency-free `./errors` leaf so consumers
+ * that only pattern-match on them don't transitively import `@/lib/auth`
+ * (Stripe at module load); re-exported here for existing callers.
  */
 
-export class UnauthorizedError extends Error {
-    constructor(message = "Authentication required") {
-        super(message)
-        this.name = "UnauthorizedError"
-    }
-}
-
-export class ForbiddenError extends Error {
-    constructor(message = "Forbidden") {
-        super(message)
-        this.name = "ForbiddenError"
-    }
-}
+export { ForbiddenError, UnauthorizedError } from "@/lib/rbac/errors"
 
 export interface AuthContext {
     userId: string
