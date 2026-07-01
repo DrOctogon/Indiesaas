@@ -126,4 +126,29 @@ describe("evaluateEvent", () => {
         // email muted for this source → only the inApp delivery remains
         expect(r.deliveries.map((d) => d.channel)).toEqual(["inApp"])
     })
+
+    it("suppresses email/push for a digest user, keeping in-app real time", () => {
+        const r = evaluateEvent(makeInput({ digestUserIds: ["u-1"] }))
+        // Digest user gets only the in-app delivery; email is batched into the
+        // daily digest, not dispatched per event.
+        expect(r.alerts).toHaveLength(1)
+        expect(r.deliveries.map((d) => d.channel)).toEqual(["inApp"])
+    })
+
+    it("does not suppress for a non-digest member sharing the audience", () => {
+        const r = evaluateEvent(
+            makeInput({
+                members: [
+                    { userId: "u-1", role: "caregiver" },
+                    { userId: "u-2", role: "caregiver" }
+                ],
+                digestUserIds: ["u-1"]
+            })
+        )
+        const emailRecipients = r.deliveries
+            .filter((d) => d.channel === "email")
+            .map((d) => d.recipientUserId)
+        // Only the non-digest member keeps a per-event email delivery.
+        expect(emailRecipients).toEqual(["u-2"])
+    })
 })

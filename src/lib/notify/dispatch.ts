@@ -1,5 +1,6 @@
-import { and, eq, sql } from "drizzle-orm"
+import { and, eq, inArray, sql } from "drizzle-orm"
 import {
+    accountPreferences,
     type CollectionName,
     notificationSubscriptions
 } from "@/database/collections"
@@ -44,6 +45,27 @@ const DELIVERIES: CollectionName = "notificationDeliveries"
 
 function toRoleId(role: string): RoleId | null {
     return ROLE_IDS.includes(role as RoleId) ? (role as RoleId) : null
+}
+
+/**
+ * Which of `userIds` have opted into the daily digest (user-global
+ * `accountPreferences.dailyDigest`). These users' per-event email/push is
+ * suppressed by the evaluator and batched into the daily digest instead.
+ */
+async function loadDigestUserIds(
+    userIds: readonly string[]
+): Promise<string[]> {
+    if (userIds.length === 0) return []
+    const rows = (await db
+        .select({ data: accountPreferences.data })
+        .from(accountPreferences)
+        .where(
+            inArray(sql`${accountPreferences.data} ->> 'userId'`, [...userIds])
+        )) as { data: { userId?: string; dailyDigest?: boolean } }[]
+    return rows
+        .filter((r) => r.data?.dailyDigest === true)
+        .map((r) => r.data.userId)
+        .filter((id): id is string => typeof id === "string")
 }
 
 interface StoredAlert extends EmittedAlert {
@@ -93,6 +115,14 @@ export async function emitForEvent(
             mutedSources: p.mutedSources
         }))
 
+        // Digest-opted members: their per-event email/push is suppressed and
+        // batched into the daily digest instead (BUILD/05 §digest). Same
+        // `accountPreferences.dailyDigest` source the digest cron reads, so
+        // suppression and batching always agree — no double-notification.
+        const digestUserIds = await loadDigestUserIds(
+            memberRefs.map((m) => m.userId)
+        )
+
         let counter = 0
         const mkId = () => `tmp-${++counter}`
 
@@ -102,6 +132,7 @@ export async function emitForEvent(
             openAlerts,
             members: memberRefs,
             preferences,
+            digestUserIds,
             now: new Date(),
             mkId
         })

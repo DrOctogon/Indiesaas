@@ -90,6 +90,13 @@ export interface EvaluateInput {
     openAlerts: readonly OpenAlertRef[]
     members: readonly MemberRef[]
     preferences: readonly NotificationPreferenceRef[]
+    /**
+     * User ids opted into the daily digest. For these users, per-event email/push
+     * deliveries are suppressed and batched into the daily digest instead
+     * (BUILD/05 §digest — "batched into one summary delivery ... rather than
+     * dispatched per event"). In-app deliveries still fire in real time.
+     */
+    digestUserIds?: readonly string[]
     now: Date
     mkId: () => string
 }
@@ -117,7 +124,17 @@ function channelAllowed(
 }
 
 export function evaluateEvent(input: EvaluateInput): EvaluateResult {
-    const { event, rules, openAlerts, members, preferences, now, mkId } = input
+    const {
+        event,
+        rules,
+        openAlerts,
+        members,
+        preferences,
+        digestUserIds,
+        now,
+        mkId
+    } = input
+    const digestUsers = new Set(digestUserIds ?? [])
     const result: EvaluateResult = { alerts: [], deliveries: [], skipped: [] }
     const nowIso = now.toISOString()
 
@@ -167,7 +184,13 @@ export function evaluateEvent(input: EvaluateInput): EvaluateResult {
 
         // 5. Channels — one delivery per member × channel, honoring mute prefs.
         for (const member of audience) {
+            const onDigest = digestUsers.has(member.userId)
             for (const channel of rule.channels) {
+                // Digest users get real-time in-app only; their email/push for the
+                // day is batched into the daily digest, not dispatched per event.
+                if (onDigest && channel !== "inApp") {
+                    continue
+                }
                 if (
                     !channelAllowed(
                         preferences,
