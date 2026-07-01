@@ -43,6 +43,15 @@ export const removeMemberInput = z
 
 export type RemoveMemberInput = z.infer<typeof removeMemberInput>
 
+/** Suspend or reactivate a member: their member row id. */
+export const memberIdInput = z
+    .object({
+        memberId: z.string().min(1, "memberId is required")
+    })
+    .strict()
+
+export type MemberIdInput = z.infer<typeof memberIdInput>
+
 /** Update workspace settings: name (timezone lives in metadata). */
 export const workspaceSettingsInput = z
     .object({
@@ -74,6 +83,7 @@ export interface WorkspaceMember {
     role: string
     name: string
     email: string
+    suspended: boolean
     createdAt: Date
 }
 

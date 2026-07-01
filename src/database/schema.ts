@@ -102,6 +102,11 @@ export const members = pgTable("members", {
         .notNull()
         .references(() => users.id, { onDelete: "cascade" }),
     role: text("role").default("member").notNull(),
+    // Deactivation flag (BUILD/06 invariant 9): a suspended member is reversible
+    // (not a hard delete) and is excluded from the active-admin count. Better
+    // Auth has no native suspended state, so it lives here and the lifecycle
+    // guards read it via loadMembers.
+    suspended: boolean("suspended").default(false).notNull(),
     createdAt: timestamp("created_at").notNull()
 })
 

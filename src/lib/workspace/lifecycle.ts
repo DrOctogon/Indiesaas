@@ -23,7 +23,11 @@ import {
 
 async function loadMembers(workspaceId: string): Promise<MemberLike[]> {
     const rows = await db
-        .select({ userId: members.userId, role: members.role })
+        .select({
+            userId: members.userId,
+            role: members.role,
+            suspended: members.suspended
+        })
         .from(members)
         .where(eq(members.organizationId, workspaceId))
     return rows
@@ -48,6 +52,17 @@ export async function guardRoleChange(
         targetUserId,
         newRole
     )
+}
+
+/**
+ * Block suspending (deactivating) the last active admin. Suspension drops the
+ * target from the active set exactly like removal, so it reuses the same guard.
+ */
+export async function guardSuspendMember(
+    workspaceId: string,
+    targetUserId: string
+): Promise<void> {
+    assertNotLastAdminRemoval(await loadMembers(workspaceId), targetUserId)
 }
 
 /**

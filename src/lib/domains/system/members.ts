@@ -1,16 +1,21 @@
 "use server"
 
+import { and, eq } from "drizzle-orm"
 import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
+import { db } from "@/database/db"
+import { members as membersTable } from "@/database/schema"
 import { type ActionResult, fail, failFrom, ok } from "@/lib/domains/result"
 import {
     type WorkspaceMember,
     changeRoleInput,
     inviteMemberInput,
+    memberIdInput,
     removeMemberInput
 } from "@/lib/domains/system/types"
 import { auth } from "@/lib/auth"
 import { requireManage } from "@/lib/rbac/guards"
+import { guardSuspendMember } from "@/lib/workspace/lifecycle"
 
 /**
  * Members domain operations (System area, admin-only — navKey "members").
@@ -30,15 +35,25 @@ const MEMBERS_PATH = "/admin/members"
 /** List the active workspace's members (admin-only). */
 export async function listMembers(): Promise<ActionResult<WorkspaceMember[]>> {
     try {
-        await requireManage("members", ["admin"])
+        const ctx = await requireManage("members", ["admin"])
         const requestHeaders = await headers()
         const result = await auth.api.listMembers({ headers: requestHeaders })
+        // Better Auth's listMembers does not surface our custom `suspended`
+        // column, so read it directly (workspace-scoped) and merge by member id.
+        const statusRows = await db
+            .select({ id: membersTable.id, suspended: membersTable.suspended })
+            .from(membersTable)
+            .where(eq(membersTable.organizationId, ctx.workspaceId))
+        const suspendedById = new Map(
+            statusRows.map((r) => [r.id, r.suspended])
+        )
         const members: WorkspaceMember[] = result.members.map((m) => ({
             id: m.id,
             userId: m.userId,
             role: m.role,
             name: m.user.name,
             email: m.user.email,
+            suspended: suspendedById.get(m.id) ?? false,
             createdAt: m.createdAt
         }))
         return ok(members)
@@ -107,6 +122,109 @@ export async function removeMember(
         })
         revalidatePath(MEMBERS_PATH)
         return ok({ memberIdOrEmail: parsed.data.memberIdOrEmail })
+    } catch (error) {
+        return failFrom(error)
+    }
+}
+
+/**
+ * Resolve a member row by id, scoped to the active workspace. Returns null when
+ * the id belongs to another workspace or does not exist — cross-workspace ids
+ * are indistinguishable from missing ones.
+ */
+async function findWorkspaceMember(
+    memberId: string,
+    workspaceId: string
+): Promise<{ userId: string } | null> {
+    const [row] = await db
+        .select({ userId: membersTable.userId })
+        .from(membersTable)
+        .where(
+            and(
+                eq(membersTable.id, memberId),
+                eq(membersTable.organizationId, workspaceId)
+            )
+        )
+    return row ?? null
+}
+
+/**
+ * Suspend (deactivate) a member — reversible, not a hard delete (BUILD/06
+ * invariant 9). Admin-only. Blocked when the target is the last active admin.
+ */
+export async function suspendMember(
+    input: unknown
+): Promise<ActionResult<{ memberId: string }>> {
+    try {
+        const ctx = await requireManage("members", ["admin"])
+        const parsed = memberIdInput.safeParse(input)
+        if (!parsed.success) {
+            return fail(parsed.error.issues[0]?.message ?? "Invalid member.")
+        }
+        const member = await findWorkspaceMember(
+            parsed.data.memberId,
+            ctx.workspaceId
+        )
+        if (!member) {
+            return fail("Member not found.")
+        }
+        try {
+            // Throws LastAdminError if this would drop the last active admin.
+            await guardSuspendMember(ctx.workspaceId, member.userId)
+        } catch (guardError) {
+            return fail(
+                guardError instanceof Error
+                    ? guardError.message
+                    : "Cannot suspend the last active admin."
+            )
+        }
+        await db
+            .update(membersTable)
+            .set({ suspended: true })
+            .where(
+                and(
+                    eq(membersTable.id, parsed.data.memberId),
+                    eq(membersTable.organizationId, ctx.workspaceId)
+                )
+            )
+        revalidatePath(MEMBERS_PATH)
+        return ok({ memberId: parsed.data.memberId })
+    } catch (error) {
+        return failFrom(error)
+    }
+}
+
+/**
+ * Reactivate a suspended member (admin-only). Never guarded — restoring a
+ * member can only grow the active set, so it can't violate the last-admin rule.
+ */
+export async function reactivateMember(
+    input: unknown
+): Promise<ActionResult<{ memberId: string }>> {
+    try {
+        const ctx = await requireManage("members", ["admin"])
+        const parsed = memberIdInput.safeParse(input)
+        if (!parsed.success) {
+            return fail(parsed.error.issues[0]?.message ?? "Invalid member.")
+        }
+        const member = await findWorkspaceMember(
+            parsed.data.memberId,
+            ctx.workspaceId
+        )
+        if (!member) {
+            return fail("Member not found.")
+        }
+        await db
+            .update(membersTable)
+            .set({ suspended: false })
+            .where(
+                and(
+                    eq(membersTable.id, parsed.data.memberId),
+                    eq(membersTable.organizationId, ctx.workspaceId)
+                )
+            )
+        revalidatePath(MEMBERS_PATH)
+        return ok({ memberId: parsed.data.memberId })
     } catch (error) {
         return failFrom(error)
     }
