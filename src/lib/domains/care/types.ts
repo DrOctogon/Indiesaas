@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { refineVitalBounds } from "./vital-bounds"
 
 /**
  * Care-domain types + input validation (see BUILD/03 §Care collections).
@@ -195,6 +196,7 @@ export const vitalInput = z
         note: z.string().optional()
     })
     .strict()
+    .superRefine((val, ctx) => refineVitalBounds(val, ctx))
 
 export type VitalInput = z.infer<typeof vitalInput>
 export type Vital = VitalInput & { id: string }
