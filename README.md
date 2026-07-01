@@ -54,17 +54,18 @@ cp .env.example .env.local
 ```
 
 ### 4. Database Setup
-Generate the authentication schema and run migrations:
+Create a database and run migrations. The standalone CLIs do **not** autoload `.env.local`, and `src/lib/auth.ts` builds the Stripe client at import time — so source the env first (this exports `DATABASE_URL` and `STRIPE_SECRET_KEY`):
 
 ```bash
-# Generate Better Auth schema
-npx @better-auth/cli generate
+# Local Postgres, once
+createdb indie_dev   # then set DATABASE_URL=postgresql://<user>@localhost:5432/indie_dev in .env.local
 
-# Generate Drizzle migrations
-npx drizzle-kit generate
+# Generate Better Auth schema (merge auth-schema.ts into src/database/schema.ts)
+set -a && . ./.env.local && set +a && npx @better-auth/cli generate
 
-# Run migrations
-npx drizzle-kit migrate
+# Generate + apply Drizzle migrations (output dir migrations/ is gitignored)
+set -a && . ./.env.local && set +a && npx drizzle-kit generate
+set -a && . ./.env.local && set +a && npx drizzle-kit migrate
 ```
 
 ### 5. Start Development Server
@@ -103,6 +104,22 @@ next.config.ts            # Next.js configuration
 biome.json                # Biome linter/formatter config
 ```
 
+
+## Testing
+
+```bash
+pnpm test   # vitest run — pure engine tests in src/lib/engine/*.test.ts
+```
+
+The tenant-isolation integration test (`src/lib/repository.integration.test.ts`) exercises real Postgres and is skipped unless `DATABASE_URL` is set:
+
+```bash
+set -a && . ./.env.local && set +a && npx vitest run src/lib/repository.integration.test.ts
+```
+
+## Scheduled Jobs
+
+`vercel.json` registers Vercel Cron jobs that hit GET route handlers under `src/app/api/cron/` (daily digest, visit reminders). They authenticate via a `CRON_SECRET` bearer token, never throw, and no-op when email (`RESEND_API_KEY` + `EMAIL_FROM`) is unconfigured.
 
 ## Usage
 
