@@ -65,6 +65,24 @@ export const transferOwnershipInput = z
 
 export type TransferOwnershipInput = z.infer<typeof transferOwnershipInput>
 
+/** Revoke a pending invitation: the invitation row id. */
+export const revokeInvitationInput = z
+    .object({
+        invitationId: z.string().min(1, "invitationId is required")
+    })
+    .strict()
+
+export type RevokeInvitationInput = z.infer<typeof revokeInvitationInput>
+
+/** A pending invitation surfaced in the admin Members table. */
+export interface PendingInvitation {
+    id: string
+    email: string
+    role: string
+    status: string
+    expiresAt: Date
+}
+
 /** Update workspace settings: name (timezone lives in metadata). */
 export const workspaceSettingsInput = z
     .object({

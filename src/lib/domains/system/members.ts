@@ -7,11 +7,13 @@ import { db } from "@/database/db"
 import { members as membersTable } from "@/database/schema"
 import { type ActionResult, fail, failFrom, ok } from "@/lib/domains/result"
 import {
+    type PendingInvitation,
     type WorkspaceMember,
     changeRoleInput,
     inviteMemberInput,
     memberIdInput,
     removeMemberInput,
+    revokeInvitationInput,
     transferOwnershipInput
 } from "@/lib/domains/system/types"
 import { auth } from "@/lib/auth"
@@ -279,6 +281,82 @@ export async function transferOwnership(
         }
         revalidatePath(MEMBERS_PATH)
         return ok({ targetMemberId: parsed.data.targetMemberId })
+    } catch (error) {
+        return failFrom(error)
+    }
+}
+
+/** List pending (unaccepted) invitations for the active workspace (admin-only). */
+export async function listPendingInvitations(): Promise<
+    ActionResult<PendingInvitation[]>
+> {
+    try {
+        await requireManage("members", ["admin"])
+        const result = await auth.api.listInvitations({
+            headers: await headers()
+        })
+        const pending: PendingInvitation[] = result
+            .filter((inv) => inv.status === "pending")
+            .map((inv) => ({
+                id: inv.id,
+                email: inv.email,
+                role: inv.role ?? "",
+                status: inv.status,
+                expiresAt: inv.expiresAt
+            }))
+        return ok(pending)
+    } catch (error) {
+        return failFrom(error)
+    }
+}
+
+/** Revoke a pending invitation (admin-only). */
+export async function revokeInvitation(
+    input: unknown
+): Promise<ActionResult<{ invitationId: string }>> {
+    try {
+        await requireManage("members", ["admin"])
+        const parsed = revokeInvitationInput.safeParse(input)
+        if (!parsed.success) {
+            return fail(
+                parsed.error.issues[0]?.message ?? "Invalid invitation."
+            )
+        }
+        await auth.api.cancelInvitation({
+            body: { invitationId: parsed.data.invitationId },
+            headers: await headers()
+        })
+        revalidatePath(MEMBERS_PATH)
+        return ok({ invitationId: parsed.data.invitationId })
+    } catch (error) {
+        return failFrom(error)
+    }
+}
+
+/**
+ * Resend a pending invitation email (admin-only). Reuses the invite input
+ * (email + role) and Better Auth's `resend` flag, which re-sends the email for
+ * an existing pending invite rather than creating a duplicate.
+ */
+export async function resendInvitation(
+    input: unknown
+): Promise<ActionResult<{ email: string }>> {
+    try {
+        await requireManage("members", ["admin"])
+        const parsed = inviteMemberInput.safeParse(input)
+        if (!parsed.success) {
+            return fail(parsed.error.issues[0]?.message ?? "Invalid invite.")
+        }
+        await auth.api.createInvitation({
+            body: {
+                email: parsed.data.email,
+                role: parsed.data.role,
+                resend: true
+            },
+            headers: await headers()
+        })
+        revalidatePath(MEMBERS_PATH)
+        return ok({ email: parsed.data.email })
     } catch (error) {
         return failFrom(error)
     }

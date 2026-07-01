@@ -1,4 +1,7 @@
-import { listMembers } from "@/lib/domains/system/members"
+import {
+    listMembers,
+    listPendingInvitations
+} from "@/lib/domains/system/members"
 import { requireManage } from "@/lib/rbac/guards"
 import { MembersAdmin } from "./members-admin"
 
@@ -26,8 +29,14 @@ export default async function MembersPage() {
         )
     }
 
-    const result = await listMembers()
-    const members = result.status ? (result.data ?? []) : []
+    const [membersResult, invitationsResult] = await Promise.all([
+        listMembers(),
+        listPendingInvitations()
+    ])
+    const members = membersResult.status ? (membersResult.data ?? []) : []
+    const invitations = invitationsResult.status
+        ? (invitationsResult.data ?? [])
+        : []
 
     return (
         <main className="flex flex-col gap-6 p-6">
@@ -39,7 +48,11 @@ export default async function MembersPage() {
                 </p>
             </div>
 
-            <MembersAdmin members={members} currentUserId={actorUserId} />
+            <MembersAdmin
+                members={members}
+                invitations={invitations}
+                currentUserId={actorUserId}
+            />
         </main>
     )
 }

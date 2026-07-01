@@ -4,61 +4,56 @@ import { useState, useTransition } from "react"
 import {
     changeMemberRole,
     inviteMember,
-    removeMember
+    reactivateMember,
+    removeMember,
+    resendInvitation,
+    revokeInvitation,
+    suspendMember,
+    transferOwnership
 } from "@/lib/domains/system/members"
-import type { WorkspaceMember } from "@/lib/domains/system/types"
+import type {
+    PendingInvitation,
+    WorkspaceMember
+} from "@/lib/domains/system/types"
 import { ROLE_IDS } from "@/lib/rbac/access"
 
 /**
- * Members admin island (client). Wires the invite / role-change / remove entry
- * points to the guarded server actions and renders whatever envelope comes back.
- * It is purely cosmetic gating — every action re-guards server-side, and the
- * last-active-admin / seat-cap protections live in the org-plugin hooks, so a
- * blocked op surfaces here as a failure message rather than mutating state.
+ * Members admin island (client). Wires the invite / role-change / remove /
+ * suspend / reactivate / transfer-ownership entry points and the pending-invite
+ * revoke / resend actions to the guarded server actions, rendering whatever
+ * envelope comes back. It is purely cosmetic gating — every action re-guards
+ * server-side, and the last-active-admin / seat-cap protections live in the
+ * server actions, so a blocked op surfaces here as a failure message rather than
+ * mutating state.
  */
 export function MembersAdmin({
     members,
+    invitations,
     currentUserId
 }: {
     members: WorkspaceMember[]
+    invitations: PendingInvitation[]
     currentUserId: string
 }) {
     const [pending, startTransition] = useTransition()
     const [message, setMessage] = useState<string | null>(null)
 
+    function run(
+        action: () => Promise<{ status: boolean; message?: string }>,
+        ok: string
+    ) {
+        startTransition(async () => {
+            const result = await action()
+            setMessage(
+                result.status ? ok : (result.message ?? "Action failed.")
+            )
+        })
+    }
+
     function onInvite(formData: FormData) {
         const email = String(formData.get("email") ?? "")
         const role = String(formData.get("role") ?? "")
-        startTransition(async () => {
-            const result = await inviteMember({ email, role })
-            setMessage(
-                result.status
-                    ? `Invitation sent to ${result.data?.email}.`
-                    : (result.message ?? "Failed to invite.")
-            )
-        })
-    }
-
-    function onChangeRole(memberId: string, role: string) {
-        startTransition(async () => {
-            const result = await changeMemberRole({ memberId, role })
-            setMessage(
-                result.status
-                    ? "Role updated."
-                    : (result.message ?? "Failed to update role.")
-            )
-        })
-    }
-
-    function onRemove(memberIdOrEmail: string) {
-        startTransition(async () => {
-            const result = await removeMember({ memberIdOrEmail })
-            setMessage(
-                result.status
-                    ? "Member removed."
-                    : (result.message ?? "Failed to remove member.")
-            )
-        })
+        run(() => inviteMember({ email, role }), `Invitation sent to ${email}.`)
     }
 
     return (
@@ -115,13 +110,25 @@ export function MembersAdmin({
                                 <span className="ml-2 text-muted-foreground">
                                     {member.email}
                                 </span>
+                                {member.suspended ? (
+                                    <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800 text-xs">
+                                        suspended
+                                    </span>
+                                ) : null}
                             </div>
 
                             <select
                                 value={member.role}
                                 disabled={pending || isSelf}
                                 onChange={(event) =>
-                                    onChangeRole(member.id, event.target.value)
+                                    run(
+                                        () =>
+                                            changeMemberRole({
+                                                memberId: member.id,
+                                                role: event.target.value
+                                            }),
+                                        "Role updated."
+                                    )
                                 }
                                 className="ml-auto rounded border px-2 py-1"
                             >
@@ -132,10 +139,73 @@ export function MembersAdmin({
                                 ))}
                             </select>
 
+                            {member.role !== "admin" && !isSelf ? (
+                                <button
+                                    type="button"
+                                    disabled={pending}
+                                    onClick={() =>
+                                        run(
+                                            () =>
+                                                transferOwnership({
+                                                    targetMemberId: member.id
+                                                }),
+                                            "Ownership transferred (promoted to admin)."
+                                        )
+                                    }
+                                    className="rounded border px-2 py-1 text-sm disabled:opacity-50"
+                                >
+                                    Make owner
+                                </button>
+                            ) : null}
+
+                            {member.suspended ? (
+                                <button
+                                    type="button"
+                                    disabled={pending}
+                                    onClick={() =>
+                                        run(
+                                            () =>
+                                                reactivateMember({
+                                                    memberId: member.id
+                                                }),
+                                            "Member reactivated."
+                                        )
+                                    }
+                                    className="rounded border px-2 py-1 text-sm disabled:opacity-50"
+                                >
+                                    Reactivate
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    disabled={pending || isSelf}
+                                    onClick={() =>
+                                        run(
+                                            () =>
+                                                suspendMember({
+                                                    memberId: member.id
+                                                }),
+                                            "Member suspended."
+                                        )
+                                    }
+                                    className="rounded border px-2 py-1 text-sm disabled:opacity-50"
+                                >
+                                    Suspend
+                                </button>
+                            )}
+
                             <button
                                 type="button"
                                 disabled={pending || isSelf}
-                                onClick={() => onRemove(member.id)}
+                                onClick={() =>
+                                    run(
+                                        () =>
+                                            removeMember({
+                                                memberIdOrEmail: member.id
+                                            }),
+                                        "Member removed."
+                                    )
+                                }
                                 className="rounded border px-2 py-1 text-sm disabled:opacity-50"
                             >
                                 Remove
@@ -144,6 +214,58 @@ export function MembersAdmin({
                     )
                 })}
             </ul>
+
+            {invitations.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                    <h2 className="font-medium text-sm">Pending invitations</h2>
+                    <ul className="flex flex-col gap-2">
+                        {invitations.map((inv) => (
+                            <li
+                                key={inv.id}
+                                className="flex flex-wrap items-center gap-3 rounded border px-3 py-2 text-sm"
+                            >
+                                <span className="font-medium">{inv.email}</span>
+                                <span className="text-muted-foreground">
+                                    {inv.role}
+                                </span>
+                                <button
+                                    type="button"
+                                    disabled={pending}
+                                    onClick={() =>
+                                        run(
+                                            () =>
+                                                resendInvitation({
+                                                    email: inv.email,
+                                                    role: inv.role
+                                                }),
+                                            `Invitation resent to ${inv.email}.`
+                                        )
+                                    }
+                                    className="ml-auto rounded border px-2 py-1 text-sm disabled:opacity-50"
+                                >
+                                    Resend
+                                </button>
+                                <button
+                                    type="button"
+                                    disabled={pending}
+                                    onClick={() =>
+                                        run(
+                                            () =>
+                                                revokeInvitation({
+                                                    invitationId: inv.id
+                                                }),
+                                            "Invitation revoked."
+                                        )
+                                    }
+                                    className="rounded border px-2 py-1 text-sm disabled:opacity-50"
+                                >
+                                    Revoke
+                                </button>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            ) : null}
 
             {message ? <p className="text-sm">{message}</p> : null}
         </div>
