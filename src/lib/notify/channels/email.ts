@@ -22,22 +22,35 @@ async function getClient() {
     }
 }
 
+/** A file attachment (e.g. a rendered PDF) for `sendEmail`. */
+export interface EmailAttachment {
+    filename: string
+    content: Buffer
+}
+
 /**
- * Send a plain-text email. Returns 1 on a successful send, 0 on no-op or
- * failure. Never throws — failures are logged server-side and swallowed so a
- * mail outage can't break a domain mutation.
+ * Send a plain-text email, optionally with attachments. Returns 1 on a
+ * successful send, 0 on no-op or failure. Never throws — failures are logged
+ * server-side and swallowed so a mail outage can't break a domain mutation.
  */
 export async function sendEmail(
     to: string,
     subject: string,
-    body: string
+    body: string,
+    attachments?: EmailAttachment[]
 ): Promise<number> {
     const from = process.env.EMAIL_FROM
     if (!from) return 0
     const client = await getClient()
     if (!client) return 0
     try {
-        await client.emails.send({ from, to, subject, text: body })
+        await client.emails.send({
+            from,
+            to,
+            subject,
+            text: body,
+            ...(attachments?.length ? { attachments } : {})
+        })
         return 1
     } catch (error) {
         console.error("[notify/email] send failed", error)
