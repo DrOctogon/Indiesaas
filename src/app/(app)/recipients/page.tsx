@@ -1,3 +1,4 @@
+import Link from "next/link"
 import { listRecipients } from "@/lib/domains/life/recipients"
 import { requireAccess } from "@/lib/rbac/guards"
 import { NewRecipientForm } from "./new-recipient-form"
@@ -39,22 +40,30 @@ export default async function RecipientsPage() {
 
             <ul className="flex flex-col gap-2">
                 {recipients.map((recipient) => (
-                    <li
-                        key={recipient.id}
-                        className="rounded border px-3 py-2 text-sm"
-                    >
-                        <span className="font-medium">{recipient.name}</span>
-                        {recipient.dob ? ` · dob ${recipient.dob}` : ""}
-                        {recipient.conditions.length
-                            ? ` · ${recipient.conditions.length} condition${
-                                  recipient.conditions.length === 1 ? "" : "s"
-                              }`
-                            : ""}
-                        {recipient.allergies.length
-                            ? ` · ⚠ ${recipient.allergies.length} allerg${
-                                  recipient.allergies.length === 1 ? "y" : "ies"
-                              }`
-                            : ""}
+                    <li key={recipient.id}>
+                        <Link
+                            href={`/recipients/${recipient.id}`}
+                            className="block rounded border px-3 py-2 text-sm hover:bg-muted"
+                        >
+                            <span className="font-medium">
+                                {recipient.name}
+                            </span>
+                            {recipient.dob ? ` · dob ${recipient.dob}` : ""}
+                            {recipient.conditions.length
+                                ? ` · ${recipient.conditions.length} condition${
+                                      recipient.conditions.length === 1
+                                          ? ""
+                                          : "s"
+                                  }`
+                                : ""}
+                            {recipient.allergies.length
+                                ? ` · ⚠ ${recipient.allergies.length} allerg${
+                                      recipient.allergies.length === 1
+                                          ? "y"
+                                          : "ies"
+                                  }`
+                                : ""}
+                        </Link>
                     </li>
                 ))}
             </ul>

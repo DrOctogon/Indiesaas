@@ -37,6 +37,22 @@ export async function listRecipients(): Promise<ActionResult<Recipient[]>> {
     }
 }
 
+/**
+ * Fetch a single recipient by id (view-gated, workspace-scoped). A recipient
+ * from another workspace is indistinguishable from a missing one (both → null).
+ */
+export async function getRecipient(
+    id: string
+): Promise<ActionResult<Recipient | null>> {
+    try {
+        const ctx = await requireAccess("recipients")
+        const repo = new Repository(ctx.userId, ctx.workspaceId)
+        return ok(await repo.get<Recipient>(COLLECTION, id))
+    } catch (error) {
+        return failFrom(error)
+    }
+}
+
 /** Create a recipient (write-gated to the `care` area). */
 export async function createRecipient(
     input: unknown
