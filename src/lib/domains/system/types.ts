@@ -52,6 +52,19 @@ export const memberIdInput = z
 
 export type MemberIdInput = z.infer<typeof memberIdInput>
 
+/**
+ * Transfer ownership: promote the target member to admin, optionally demoting
+ * the current admin to a non-admin role (omit to co-own as two admins).
+ */
+export const transferOwnershipInput = z
+    .object({
+        targetMemberId: z.string().min(1, "targetMemberId is required"),
+        demoteSelfTo: z.enum(["caregiver", "family", "household"]).optional()
+    })
+    .strict()
+
+export type TransferOwnershipInput = z.infer<typeof transferOwnershipInput>
+
 /** Update workspace settings: name (timezone lives in metadata). */
 export const workspaceSettingsInput = z
     .object({

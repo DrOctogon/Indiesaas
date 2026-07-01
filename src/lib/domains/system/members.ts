@@ -11,7 +11,8 @@ import {
     changeRoleInput,
     inviteMemberInput,
     memberIdInput,
-    removeMemberInput
+    removeMemberInput,
+    transferOwnershipInput
 } from "@/lib/domains/system/types"
 import { auth } from "@/lib/auth"
 import { requireManage } from "@/lib/rbac/guards"
@@ -225,6 +226,59 @@ export async function reactivateMember(
             )
         revalidatePath(MEMBERS_PATH)
         return ok({ memberId: parsed.data.memberId })
+    } catch (error) {
+        return failFrom(error)
+    }
+}
+
+/**
+ * Transfer ownership (admin-only): promote the target member to admin and,
+ * optionally, demote the current admin to a non-admin role. The target is
+ * promoted FIRST so at least two admins exist before any self-demotion — the
+ * last-active-admin guard (org hook) then permits the demotion.
+ */
+export async function transferOwnership(
+    input: unknown
+): Promise<ActionResult<{ targetMemberId: string }>> {
+    try {
+        const ctx = await requireManage("members", ["admin"])
+        const parsed = transferOwnershipInput.safeParse(input)
+        if (!parsed.success) {
+            return fail(parsed.error.issues[0]?.message ?? "Invalid transfer.")
+        }
+        const target = await findWorkspaceMember(
+            parsed.data.targetMemberId,
+            ctx.workspaceId
+        )
+        if (!target) {
+            return fail("Member not found.")
+        }
+        if (target.userId === ctx.userId) {
+            return fail("Cannot transfer ownership to yourself.")
+        }
+        const requestHeaders = await headers()
+        // Promote target to admin first (now two admins).
+        await auth.api.updateMemberRole({
+            body: { memberId: parsed.data.targetMemberId, role: "admin" },
+            headers: requestHeaders
+        })
+        // Optionally step down; safe now that the target is already an admin.
+        if (parsed.data.demoteSelfTo) {
+            const self = await auth.api.getActiveMember({
+                headers: requestHeaders
+            })
+            if (self?.id) {
+                await auth.api.updateMemberRole({
+                    body: {
+                        memberId: self.id,
+                        role: parsed.data.demoteSelfTo
+                    },
+                    headers: requestHeaders
+                })
+            }
+        }
+        revalidatePath(MEMBERS_PATH)
+        return ok({ targetMemberId: parsed.data.targetMemberId })
     } catch (error) {
         return failFrom(error)
     }
